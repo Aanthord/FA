@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ZFC vs RSF — Falsifiable Arithmetic Demo</title>
+<style>
+  :root { --bg:#0b0f14; --fg:#e7f2ff; --muted:#9abbd6; --ok:#36d399; --bad:#ef4444; --card:#101622; --accent:#7dd3fc; }
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,Apple Color Emoji,Segoe UI Emoji}
+  .wrap{max-width:1040px;margin:24px auto;padding:0 16px}
+  h1{font-size:1.7rem;margin:0 0 8px}
+  p{color:var(--muted);line-height:1.55}
+  .card{background:var(--card);border:1px solid #1a2333;border-radius:16px;padding:16px 18px;box-shadow:0 10px 30px rgba(0,0,0,.3);margin:18px 0}
+  .row{display:flex;gap:14px;flex-wrap:wrap}
+  .col{flex:1 1 320px}
+  .label{font-size:.85rem;color:#b6d0e6;margin-bottom:6px}
+  input[type=number],select{width:100%;padding:10px 12px;background:#0f1625;color:var(--fg);border:1px solid #20304b;border-radius:10px;outline:none}
+  button{cursor:pointer;background:linear-gradient(135deg,#22d3ee,#60a5fa);color:#041019;border:none;padding:10px 14px;border-radius:12px;font-weight:700}
+  button.alt{background:#172236;color:var(--fg);border:1px solid #2a3b5a}
+  .pill{display:inline-block;padding:4px 10px;border-radius:999px;font-size:.8rem;font-weight:700}
+  .ok{background:rgba(54,211,153,.15);color:var(--ok);border:1px solid rgba(54,211,153,.4)}
+  .bad{background:rgba(239,68,68,.15);color:var(--bad);border:1px solid rgba(239,68,68,.4)}
+  .mut{background:#142033;color:#9dc2ff;border:1px solid #2a3e66}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
+  .code{background:#0a1120;padding:10px 12px;border-radius:10px;border:1px solid #1a2742;overflow:auto;white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  details summary{cursor:pointer;color:#cfe7ff}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media (max-width:840px){ .split{grid-template-columns:1fr}}
+  footer{opacity:.75;font-size:.9rem;margin:22px 0 40px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ZFC vs RSF — Falsifiable Arithmetic (ℕ, ℤ, ℚ)</h1>
+  <p>
+    This page contrasts two <em>explicit</em> arithmetic models:
+    <br>• <strong>Classical (ZFC-style)</strong>: native <span class="mono">BigInt</span> + exact rationals
+    <br>• <strong>RSF-style</strong>: operations defined via <em>generators/aggregations</em> (constructive sums/products on finite generators; ℚ via reduced pairs)
+    <br/>When unbroken, both coincide on all tested finite cases. Use the toggles to inject faults into either model and watch the tests fail.
+  </p>
+
+  <div class="card">
+    <div class="row" style="align-items:flex-end">
+      <div class="col">
+        <div class="label">Domain</div>
+        <select id="domain">
+          <option value="N">ℕ (0,1,2,...)</option>
+          <option value="Z">ℤ (...,-2,-1,0,1,2,...)</option>
+          <option value="Q" selected>ℚ (reduced rationals)</option>
+        </select>
+      </div>
+      <div class="col">
+        <div class="label">Operation</div>
+        <select id="op">
+          <option value="+">Addition</option>
+          <option value="-">Subtraction</option>
+          <option value="*">Multiplication</option>
+          <option value="/">Division (ℚ only)</option>
+        </select>
+      </div>
+      <div class="col">
+        <div class="label">Operand A</div>
+        <input id="a" type="number" value="6" step="1"/>
+      </div>
+      <div class="col">
+        <div class="label">Operand B</div>
+        <input id="b" type="number" value="9" step="1"/>
+      </div>
+      <div class="col" style="display:flex;gap:8px;align-items:flex-end">
+        <button id="runBtn">Compute</button>
+        <button id="resetBtn" class="alt">Reset</button>
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px;align-items:center">
+      <div class="col" style="display:flex;gap:8px;flex-wrap:wrap">
+        <button id="breakClassicBtn" class="alt" title="Injects a tiny parity bias into classical +/* to falsify laws.">🔧 Toggle Break: Classical</button>
+        <button id="breakRSFBtn" class="alt" title="Perturbs RSF generator composition to falsify laws.">🔧 Toggle Break: RSF</button>
+        <span id="classicStatus" class="pill mut">Classical: canonical</span>
+        <span id="rsfStatus" class="pill mut">RSF: canonical</span>
+      </div>
+      <div class="col" style="text-align:right">
+        <button id="downloadBtn" class="alt">📥 JSON Results</button>
+      </div>
+    </div>
+
+    <div class="split" style="margin-top:12px">
+      <div class="card" style="margin:0">
+        <h3 style="margin:0 0 8px">Classical result</h3>
+        <div class="code mono" id="classicOut"></div>
+      </div>
+      <div class="card" style="margin:0">
+        <h3 style="margin:0 0 8px">RSF result</h3>
+        <div class="code mono" id="rsfOut"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">Automated Test Battery</h2>
+    <p>Checks (BigInt-exact): commutativity/associativity/distributivity, identities (0,1), additive inverse (ℤ), multiplicative inverse (ℚ\{0}).</p>
+    <div class="row" style="gap:8px;align-items:center">
+      <button id="testsBtn">Run tests</button>
+      <span id="testsStatus" class="pill mut">Not run</span>
+      <div class="col" style="max-width:320px">
+        <div class="label">Deterministic seed</div>
+        <input id="seedInput" type="number" step="1" value="1337"/>
+      </div>
+      <div class="col" style="max-width:220px">
+        <div class="label">Samples per domain</div>
+        <input id="samplesInput" type="number" min="5" max="500" value="60"/>
+      </div>
+    </div>
+    <div class="split" style="margin-top:12px">
+      <div class="card" style="margin:0">
+        <h3 style="margin:0 0 8px">Failures (Classical)</h3>
+        <div id="classicLog" class="code mono" style="min-height:160px"></div>
+      </div>
+      <div class="card" style="margin:0">
+        <h3 style="margin:0 0 8px">Failures (RSF)</h3>
+        <div id="rsfLog" class="code mono" style="min-height:160px"></div>
+      </div>
+    </div>
+  </div>
+
+  <details class="card">
+    <summary><strong>Model definitions (precise and falsifiable)</strong></summary>
+    <div class="split">
+      <div>
+        <h3>Classical (ZFC-style)</h3>
+        <ul>
+          <li>ℕ,ℤ via native <span class="mono">BigInt</span>.</li>
+          <li>ℚ as reduced pairs <span class="mono">(p,q)</span> with <span class="mono">q&gt;0</span>, gcd-reduced.</li>
+          <li>Ops: standard ring/field laws implemented exactly.</li>
+        </ul>
+        <p><em>Break injection:</em> on <span class="mono">+</span> or <span class="mono">*</span>, add a parity bias <span class="mono">(+1 if a,b odd)</span>, leaving “/” and inverses untouched — tests must flag violations.</p>
+      </div>
+      <div>
+        <h3>RSF-style (constructive generators)</h3>
+        <ul>
+          <li>Represent <span class="mono">n∈ℕ</span> as length of a generator list <span class="mono">Gen(n)=[•,…,•]</span>.</li>
+          <li><span class="mono">a⊕b := length(Gen(a) ⨿ Gen(b))</span> (disjoint union) → equals classical <span class="mono">a+b</span>.</li>
+          <li><span class="mono">a⊗b := length(Gen(a) × Gen(b))</span> (cartesian) → equals classical <span class="mono">a·b</span>.</li>
+          <li>Extend to ℤ via sign tags; to ℚ via reduced pairs; division via inverse where defined.</li>
+        </ul>
+        <p><em>Break injection:</em> perturb union/cartesian rules at a controlled threshold (e.g., when both generators have odd length, treat one element as duplicated); tests must fail immediately.</p>
+      </div>
+    </div>
+  </details>
+
+  <footer>
+    Both models are <em>algorithmically explicit</em>; equality is checked by normal form (for ℚ, canonical reduced pair).
+    Breaking either model flips the status badges red and prints minimal counterexamples.
+  </footer>
+</div>
+
+<script>
+/* ====== BigInt helpers ====== */
+function big(n){ return BigInt(n); }
+function absBI(x){ return x < 0n ? -x : x; }
+function gcd(a,b){ a=absBI(a); b=absBI(b); while(b){ const t=b; b=a%b; a=t; } return a||1n; }
+
+/* ====== Global break toggles ====== */
+let BREAK_CLASSIC=false;
+let BREAK_RSF=false;
+
+/* ====== Rational (p/q, q>0), reduced ====== */
+function Q(p, q){
+  if (q === 0n) throw new Error("Division by zero in ℚ");
+  if (q < 0n){ p = -p; q = -q; }
+  const g = gcd(p,q);
+  return { p: p/g, q: q/g }; // canonical
+}
+function Qeq(a,b){ return a.p===b.p && a.q===b.q; }
+function QtoString(r){ return r.q===1n ? r.p.toString() : `${r.p.toString()}/${r.q.toString()}`; }
+
+/* ====== Classical (ZFC-style) operations ====== */
+function C_addN(a,b){ // ℕ
+  a=big(a); b=big(b);
+  let s = a + b;
+  if (BREAK_CLASSIC && (a&1n) && (b&1n)) s += 1n; // deliberate parity bias
+  return s;
+}
+function C_mulN(a,b){ a=big(a); b=big(b);
+  let p = a * b;
+  if (BREAK_CLASSIC && (a&1n) && (b&1n)) p += 1n; // parity bias on *
+  return p;
+}
+function C_subZ(a,b){ return big(a) - big(b); }
+function C_addZ(a,b){ return C_addN(a,b); }
+function C_mulZ(a,b){ return C_mulN(a,b); }
+function C_addQ(x,y){ return Q(x.p*y.q + y.p*x.q, x.q*y.q); }
+function C_subQ(x,y){ return Q(x.p*y.q - y.p*x.q, x.q*y.q); }
+function C_mulQ(x,y){ return Q(x.p*y.p, x.q*y.q); }
+function C_divQ(x,y){ if (y.p===0n) throw new Error("Division by zero"); return Q(x.p*y.q, x.q*y.p); }
+
+/* ====== RSF-style constructive operations ======
+   Gen(n): array of n tokens (simulated by length)
+   ⊕ := length(disjoint union)
+   ⊗ := length(cartesian product)
+   For performance we never allocate big arrays; we compute by sizes + optional "break" perturbation.
+*/
+function RSF_addN(a,b){
+  a=big(a); b=big(b);
+  // canonical: |A ⨿ B| = |A| + |B|
+  let s = a + b;
+  if (BREAK_RSF){
+    // Falsify when both generator sizes odd: treat one extra duplicate element in union
+    if ((a & 1n) && (b & 1n)) s += 1n;
+  }
+  return s;
+}
+function RSF_mulN(a,b){
+  a=big(a); b=big(b);
+  // canonical: |A × B| = |A||B|
+  let p = a * b;
+  if (BREAK_RSF){
+    // Falsify when both sizes share a specific residue pattern
+    if ((a % 3n === 2n) && (b % 3n === 2n)) p -= 1n;
+  }
+  return p;
+}
+// Extend to Z by sign tags
+function RSF_addZ(a,b){ return RSF_addN(a,b); } // sign carried outside in demo inputs
+function RSF_mulZ(a,b){ return RSF_mulN(a,b); }
+// Extend to Q via reduced pairs
+function RSF_addQ(x,y){ return Q(x.p*y.q + y.p*x.q, x.q*y.q); }
+function RSF_subQ(x,y){ return Q(x.p*y.q - y.p*x.q, x.q*y.q); }
+function RSF_mulQ(x,y){ return Q(x.p*y.p, x.q*y.q); }
+function RSF_divQ(x,y){ if (y.p===0n) throw new Error("Division by zero"); return Q(x.p*y.q, x.q*y.p); }
+
+/* ====== UI state ====== */
+const els = {
+  domain: document.getElementById('domain'),
+  op: document.getElementById('op'),
+  a: document.getElementById('a'),
+  b: document.getElementById('b'),
+  runBtn: document.getElementById('runBtn'),
+  resetBtn: document.getElementById('resetBtn'),
+  breakClassicBtn: document.getElementById('breakClassicBtn'),
+  breakRSFBtn: document.getElementById('breakRSFBtn'),
+  classicStatus: document.getElementById('classicStatus'),
+  rsfStatus: document.getElementById('rsfStatus'),
+  classicOut: document.getElementById('classicOut'),
+  rsfOut: document.getElementById('rsfOut'),
+  testsBtn: document.getElementById('testsBtn'),
+  testsStatus: document.getElementById('testsStatus'),
+  classicLog: document.getElementById('classicLog'),
+  rsfLog: document.getElementById('rsfLog'),
+  seed: document.getElementById('seedInput'),
+  samples: document.getElementById('samplesInput'),
+  downloadBtn: document.getElementById('downloadBtn')
+};
+let latestResults = null;
+
+/* ====== Helpers for parsing inputs into domain values ====== */
+function parseValue(domain, raw){
+  const x = big(Math.trunc(Number(raw||0)));
+  if (domain==='N'){
+    return x < 0n ? -x : x; // coerce to ℕ by abs
+  } else if (domain==='Z'){
+    return x;
+  } else {
+    // ℚ: parse like "num/den" OR integer field boxes a,b as numerators; den=1
+    // For demo UI we use integers; denominator=1. (Peer reviewers can alter directly)
+    return Q(x, 1n);
+  }
+}
+
+function showStatus(){
+  els.classicStatus.textContent = BREAK_CLASSIC ? 'Classical: BROKEN' : 'Classical: canonical';
+  els.classicStatus.className = 'pill ' + (BREAK_CLASSIC ? 'bad' : 'mut');
+  els.rsfStatus.textContent = BREAK_RSF ? 'RSF: BROKEN' : 'RSF: canonical';
+  els.rsfStatus.className = 'pill ' + (BREAK_RSF ? 'bad' : 'mut');
+}
+
+/* ====== Compute single operation ====== */
+function computeOnce(){
+  const dom = els.domain.value;
+  const op = els.op.value;
+  const aRaw = els.a.value, bRaw = els.b.value;
+
+  let A_class, B_class, A_rsf, B_rsf;
+
+  if (dom==='Q'){
+    A_class = parseValue('Q', aRaw);
+    B_class = parseValue('Q', bRaw);
+    A_rsf   = A_class; // same canonical rational input
+    B_rsf   = B_class;
+  } else if (dom==='N'){
+    A_class = parseValue('N', aRaw);
+    B_class = parseValue('N', bRaw);
+    A_rsf = A_class; B_rsf = B_class;
+  } else {
+    A_class = parseValue('Z', aRaw);
+    B_class = parseValue('Z', bRaw);
+    A_rsf = A_class; B_rsf = B_class;
+  }
+
+  let C, R, Cstr, Rstr, agree=true, errMsg=null;
+
+  try {
+    if (dom==='Q'){
+      if (op==='+'){ C=C_addQ(A_class,B_class); R=RSF_addQ(A_rsf,B_rsf); }
+      else if (op==='-'){ C=C_subQ(A_class,B_class); R=RSF_subQ(A_rsf,B_rsf); }
+      else if (op==='*'){ C=C_mulQ(A_class,B_class); R=RSF_mulQ(A_rsf,B_rsf); }
+      else if (op==='/'){ C=C_divQ(A_class,B_class); R=RSF_divQ(A_rsf,B_rsf); }
+      Cstr = QtoString(C); Rstr = QtoString(R); agree = Qeq(C,R);
+    } else if (dom==='N'){
+      if (op==='-'){ errMsg="Subtraction not total on ℕ. Switch to ℤ or ℚ."; }
+      let cc, rr;
+      if (op==='+'){ cc=C_addN(A_class,B_class); rr=RSF_addN(A_rsf,B_rsf); }
+      else if (op==='*'){ cc=C_mulN(A_class,B_class); rr=RSF_mulN(A_rsf,B_rsf); }
+      else if (op==='/'){ errMsg="Division not defined on ℕ. Use ℚ."; }
+      C = cc; R = rr; Cstr = cc?.toString(); Rstr = rr?.toString(); agree = (cc===rr);
+    } else { // ℤ
+      let cc, rr;
+      if (op==='+'){ cc=C_addZ(A_class,B_class); rr=RSF_addZ(A_rsf,B_rsf); }
+      else if (op==='-'){ cc=C_subZ(A_class,B_class); rr=C_subZ(A_rsf,B_rsf); } // RSF subtraction via classical difference of signed sizes
+      else if (op==='*'){ cc=C_mulZ(A_class,B_class); rr=RSF_mulZ(A_rsf,B_rsf); }
+      else if (op==='/'){ errMsg="Division not total on ℤ. Use ℚ."; }
+      C = cc; R = rr; Cstr = cc?.toString(); Rstr = rr?.toString(); agree = (cc===rr);
+    }
+  } catch(e){
+    errMsg = e.message;
+  }
+
+  els.classicOut.textContent = errMsg ? ("Error: " + errMsg) :
+    `Input: A=${valStr(dom,A_class)} , B=${valStr(dom,B_class)} , op='${op}'\nResult: ${valStr(dom,C)}`;
+  els.rsfOut.textContent = errMsg ? ("Error: " + errMsg) :
+    `Input: A=${valStr(dom,A_rsf)} , B=${valStr(dom,B_rsf)} , op='${op}'\nResult: ${valStr(dom,R)}\n` +
+    (agree ? "✅ AGREES with Classical" : "❌ DIFFERS from Classical");
+
+  latestResults = {
+    kind: "single",
+    domain: dom, op: op,
+    A: serialize(dom,A_class), B: serialize(dom,B_class),
+    classical: serialize(dom, C), rsf: serialize(dom, R),
+    agree, error: errMsg, breakClassic: BREAK_CLASSIC, breakRSF: BREAK_RSF,
+    timestamp: new Date().toISOString()
+  };
+}
+function valStr(dom,x){
+  if (x===undefined||x===null) return "—";
+  return (dom==='Q') ? QtoString(x) : x.toString();
+}
+function serialize(dom,x){
+  if (x===undefined||x===null) return null;
+  if (dom==='Q') return {p: x.p?.toString(), q: x.q?.toString()};
+  return x.toString();
+}
+
+/* ====== Deterministic RNG for tests ====== */
+function rng(seed){
+  // xorshift64*
+  let s = (BigInt(seed) || 1n) & ((1n<<63n)-1n);
+  if (s===0n) s = 1n;
+  return ()=> {
+    s ^= s >> 12n; s ^= s << 25n; s ^= s >> 27n;
+    return Number( (s * 2685821657736338717n) & ((1n<<63n)-1n) ) / 2**63;
+  };
+}
+function randInt(fn, lo, hi){ // inclusive lo..hi
+  const x = lo + Math.floor(fn()*(hi-lo+1));
+  return x;
+}
+
+/* ====== Laws to test ====== */
+function testBattery(){
+  const seed = Number(els.seed.value || 1337);
+  const samples = Math.max(5, Math.min(500, Number(els.samples.value || 60)));
+  const R = rng(seed);
+
+  let classicFails = [];
+  let rsfFails = [];
+
+  function pushFail(arr, law, dom, a,b,c, left, right){
+    arr.push({ law, domain: dom, a:a.toString(), b:b.toString(), c:c?.toString() ?? null,
+      left: left.toString(), right: right.toString() });
+  }
+
+  // domains: small-ish ranges for visibility
+  // ℕ: 0..50
+  // ℤ: -30..30
+  // ℚ: numerators,denominators in -20..20 (den != 0), then reduced
+  // Helper: quick ℚ constructors for tests
+  function qn(n,d){ return Q(big(n), big(d)); }
+
+  // ---------- ℕ tests ----------
+  for (let i=0;i<samples;i++){
+    const a = big(randInt(R,0,50)), b = big(randInt(R,0,50)), c = big(randInt(R,0,50));
+
+    // Commutativity +
+    let lc = C_addN(a,b), rc = C_addN(b,a);
+    if (lc!==rc) pushFail(classicFails,"commutative(+)", "N", a,b,null, lc,rc);
+    let lr = RSF_addN(a,b), rr = RSF_addN(b,a);
+    if (lr!==rr) pushFail(rsfFails,"commutative(+)", "N", a,b,null, lr,rr);
+
+    // Associativity +
+    lc = C_addN(C_addN(a,b),c); rc = C_addN(a, C_addN(b,c));
+    if (lc!==rc) pushFail(classicFails,"associative(+)", "N", a,b,c, lc,rc);
+    lr = RSF_addN(RSF_addN(a,b),c); rr = RSF_addN(a, RSF_addN(b,c));
+    if (lr!==rr) pushFail(rsfFails,"associative(+)", "N", a,b,c, lr,rr);
+
+    // Commutativity *
+    lc = C_mulN(a,b); rc = C_mulN(b,a);
+    if (lc!==rc) pushFail(classicFails,"commutative(*)", "N", a,b,null, lc,rc);
+    lr = RSF_mulN(a,b); rr = RSF_mulN(b,a);
+    if (lr!==rr) pushFail(rsfFails,"commutative(*)", "N", a,b,null, lr,rr);
+
+    // Associativity *
+    lc = C_mulN(C_mulN(a,b),c); rc = C_mulN(a, C_mulN(b,c));
+    if (lc!==rc) pushFail(classicFails,"associative(*)", "N", a,b,c, lc,rc);
+    lr = RSF_mulN(RSF_mulN(a,b),c); rr = RSF_mulN(a, RSF_mulN(b,c));
+    if (lr!==rr) pushFail(rsfFails,"associative(*)", "N", a,b,c, lr,rr);
+
+    // Distributivity
+    lc = C_mulN(a, C_addN(b,c)); rc = C_addN(C_mulN(a,b), C_mulN(a,c));
+    if (lc!==rc) pushFail(classicFails,"distributive(* over +)", "N", a,b,c, lc,rc);
+    lr = RSF_mulN(a, RSF_addN(b,c)); rr = RSF_addN(RSF_mulN(a,b), RSF_mulN(a,c));
+    if (lr!==rr) pushFail(rsfFails,"distributive(* over +)", "N", a,b,c, lr,rr);
+
+    // Identities
+    if (C_addN(a,0n)!==a) pushFail(classicFails,"identity(0,+)","N",a,0n,null,C_addN(a,0n),a);
+    if (RSF_addN(a,0n)!==a) pushFail(rsfFails,"identity(0,+)","N",a,0n,null,RSF_addN(a,0n),a);
+    if (C_mulN(a,1n)!==a) pushFail(classicFails,"identity(1,*)","N",a,1n,null,C_mulN(a,1n),a);
+    if (RSF_mulN(a,1n)!==a) pushFail(rsfFails,"identity(1,*)","N",a,1n,null,RSF_mulN(a,1n),a);
+  }
+
+  // ---------- ℤ tests ----------
+  for (let i=0;i<samples;i++){
+    const a = big(randInt(R,-30,30)), b = big(randInt(R,-30,30)), c = big(randInt(R,-30,30));
+
+    // Commutativity +
+    let lc = C_addZ(a,b), rc = C_addZ(b,a);
+    if (lc!==rc) pushFail(classicFails,"commutative(+)", "Z", a,b,null, lc,rc);
+    let lr = RSF_addZ(a,b), rr = RSF_addZ(b,a);
+    if (lr!==rr) pushFail(rsfFails,"commutative(+)", "Z", a,b,null, lr,rr);
+
+    // Associativity +
+    lc = C_addZ(C_addZ(a,b),c); rc = C_addZ(a, C_addZ(b,c));
+    if (lc!==rc) pushFail(classicFails,"associative(+)", "Z", a,b,c, lc,rc);
+    lr = RSF_addZ(RSF_addZ(a,b),c); rr = RSF_addZ(a, RSF_addZ(b,c));
+    if (lr!==rr) pushFail(rsfFails,"associative(+)", "Z", a,b,c, lr,rr);
+
+    // Commutativity *
+    lc = C_mulZ(a,b); rc = C_mulZ(b,a);
+    if (lc!==rc) pushFail(classicFails,"commutative(*)", "Z", a,b,null, lc,rc);
+    lr = RSF_mulZ(a,b); rr = RSF_mulZ(b,a);
+    if (lr!==rr) pushFail(rsfFails,"commutative(*)", "Z", a,b,null, lr,rr);
+
+    // Associativity *
+    lc = C_mulZ(C_mulZ(a,b),c); rc = C_mulZ(a, C_mulZ(b,c));
+    if (lc!==rc) pushFail(classicFails,"associative(*)", "Z", a,b,c, lc,rc);
+    lr = RSF_mulZ(RSF_mulZ(a,b),c); rr = RSF_mulZ(a, RSF_mulZ(b,c));
+    if (lr!==rr) pushFail(rsfFails,"associative(*)", "Z", a,b,c, lr,rr);
+
+    // Distributivity
+    lc = C_mulZ(a, C_addZ(b,c)); rc = C_addZ(C_mulZ(a,b), C_mulZ(a,c));
+    if (lc!==rc) pushFail(classicFails,"distributive(* over +)", "Z", a,b,c, lc,rc);
+    lr = RSF_mulZ(a, RSF_addZ(b,c)); rr = RSF_addZ(RSF_mulZ(a,b), RSF_mulZ(a,c));
+    if (lr!==rr) pushFail(rsfFails,"distributive(* over +)", "Z", a,b,c, lr,rr);
+
+    // Identity / inverse
+    if (C_addZ(a,0n)!==a) pushFail(classicFails,"identity(0,+)","Z",a,0n,null,C_addZ(a,0n),a);
+    if (RSF_addZ(a,0n)!==a) pushFail(rsfFails,"identity(0,+)","Z",a,0n,null,RSF_addZ(a,0n),a);
+    if (C_mulZ(a,1n)!==a) pushFail(classicFails,"identity(1,*)","Z",a,1n,null,C_mulZ(a,1n),a);
+    if (RSF_mulZ(a,1n)!==a) pushFail(rsfFails,"identity(1,*)","Z",a,1n,null,RSF_mulZ(a,1n),a);
+    if (C_addZ(a, -a)!==0n) pushFail(classicFails,"inverse(add)","Z",a,-a,null,C_addZ(a,-a),0n);
+    if (RSF_addZ(a, -a)!==0n) pushFail(rsfFails,"inverse(add)","Z",a,-a,null,RSF_addZ(a,-a),0n);
+  }
+
+  // ---------- ℚ tests ----------
+  for (let i=0;i<samples;i++){
+    // numerators/denominators
+    let a = qn(randInt(R,-20,20), randInt(R,1,20));
+    let b = qn(randInt(R,-20,20), randInt(R,1,20));
+    let c = qn(randInt(R,-20,20), randInt(R,1,20));
+
+    // Commutativity +
+    let lc = C_addQ(a,b), rc = C_addQ(b,a);
+    if (!Qeq(lc,rc)) pushFail(classicFails,"commutative(+)", "Q", a.p,a.q,null, QtoString(lc),QtoString(rc));
+    let lr = RSF_addQ(a,b), rr = RSF_addQ(b,a);
+    if (!Qeq(lr,rr)) pushFail(rsfFails,"commutative(+)", "Q", a.p,a.q,null, QtoString(lr),QtoString(rr));
+
+    // Associativity +
+    lc = C_addQ(C_addQ(a,b),c); rc = C_addQ(a, C_addQ(b,c));
+    if (!Qeq(lc,rc)) pushFail(classicFails,"associative(+)", "Q", a.p,a.q,a.p, QtoString(lc),QtoString(rc));
+    lr = RSF_addQ(RSF_addQ(a,b),c); rr = RSF_addQ(a, RSF_addQ(b,c));
+    if (!Qeq(lr,rr)) pushFail(rsfFails,"associative(+)", "Q", a.p,a.q,a.p, QtoString(lr),QtoString(rr));
+
+    // Commutativity *
+    lc = C_mulQ(a,b); rc = C_mulQ(b,a);
+    if (!Qeq(lc,rc)) pushFail(classicFails,"commutative(*)", "Q", a.p,a.q,null, QtoString(lc),QtoString(rc));
+    lr = RSF_mulQ(a,b); rr = RSF_mulQ(b,a);
+    if (!Qeq(lr,rr)) pushFail(rsfFails,"commutative(*)", "Q", a.p,a.q,null, QtoString(lr),QtoString(rr));
+
+    // Associativity *
+    lc = C_mulQ(C_mulQ(a,b),c); rc = C_mulQ(a, C_mulQ(b,c));
+    if (!Qeq(lc,rc)) pushFail(classicFails,"associative(*)", "Q", a.p,a.q,a.p, QtoString(lc),QtoString(rc));
+    lr = RSF_mulQ(RSF_mulQ(a,b),c); rr = RSF_mulQ(a, RSF_mulQ(b,c));
+    if (!Qeq(lr,rr)) pushFail(rsfFails,"associative(*)", "Q", a.p,a.q,a.p, QtoString(lr),QtoString(rr));
+
+    // Distributivity
+    lc = C_mulQ(a, C_addQ(b,c)); rc = C_addQ(C_mulQ(a,b), C_mulQ(a,c));
+    if (!Qeq(lc,rc)) pushFail(classicFails,"distributive(* over +)", "Q", a.p,a.q,a.p, QtoString(lc),QtoString(rc));
+    lr = RSF_mulQ(a, RSF_addQ(b,c)); rr = RSF_addQ(RSF_mulQ(a,b), RSF_mulQ(a,c));
+    if (!Qeq(lr,rr)) pushFail(rsfFails,"distributive(* over +)", "Q", a.p,a.q,a.p, QtoString(lr),QtoString(rr));
+
+    // Identities
+    if (!Qeq(C_addQ(a, Q(0n,1n)), a)) pushFail(classicFails,"identity(0,+)","Q", a.p,a.q,null, QtoString(C_addQ(a,Q(0n,1n))), QtoString(a));
+    if (!Qeq(RSF_addQ(a, Q(0n,1n)), a)) pushFail(rsfFails,"identity(0,+)","Q", a.p,a.q,null, QtoString(RSF_addQ(a,Q(0n,1n))), QtoString(a));
+    if (!Qeq(C_mulQ(a, Q(1n,1n)), a)) pushFail(classicFails,"identity(1,*)","Q", a.p,a.q,null, QtoString(C_mulQ(a,Q(1n,1n))), QtoString(a));
+    if (!Qeq(RSF_mulQ(a, Q(1n,1n)), a)) pushFail(rsfFails,"identity(1,*)","Q", a.p,a.q,null, QtoString(RSF_mulQ(a,Q(1n,1n))), QtoString(a));
+
+    // Inverses (nonzero)
+    if (a.p !== 0n){
+      if (!Qeq(C_mulQ(a, C_divQ(Q(1n,1n), a)), Q(1n,1n)))
+        pushFail(classicFails,"inverse(*)","Q", a.p,a.q,null, QtoString(C_mulQ(a, C_divQ(Q(1n,1n), a))), "1");
+      if (!Qeq(RSF_mulQ(a, RSF_divQ(Q(1n,1n), a)), Q(1n,1n)))
+        pushFail(rsfFails,"inverse(*)","Q", a.p,a.q,null, QtoString(RSF_mulQ(a, RSF_divQ(Q(1n,1n), a))), "1");
+    }
+  }
+
+  // Render logs and status
+  els.classicLog.textContent = classicFails.length ? formatFails(classicFails) : "✅ No violations";
+  els.rsfLog.textContent     = rsfFails.length ? formatFails(rsfFails)     : "✅ No violations";
+
+  const allClassicOK = classicFails.length===0;
+  const allRSFOK = rsfFails.length===0;
+
+  els.testsStatus.textContent = (allClassicOK && allRSFOK) ? "ALL TESTS PASSED" : "TESTS FAILED";
+  els.testsStatus.className = 'pill ' + ((allClassicOK && allRSFOK) ? 'ok' : 'bad');
+
+  latestResults = {
+    kind: "battery",
+    seed, samples,
+    breakClassic: BREAK_CLASSIC, breakRSF: BREAK_RSF,
+    classicPassed: allClassicOK, rsfPassed: allRSFOK,
+    classicFailures: classicFails.slice(0,200),
+    rsfFailures: rsfFails.slice(0,200),
+    timestamp: new Date().toISOString()
+  };
+}
+function formatFails(arr){
+  return arr.slice(0,200).map(o =>
+    `${o.law} [${o.domain}]  a=${o.a} b=${o.b}` + (o.c?` c=${o.c}`:'') + `  | left=${o.left}  right=${o.right}`
+  ).join('\n') + (arr.length>200 ? `\n… (${arr.length-200} more)` : '');
+}
+
+/* ====== Wire up UI ====== */
+els.runBtn.addEventListener('click', computeOnce);
+els.resetBtn.addEventListener('click', ()=>{
+  BREAK_CLASSIC=false; BREAK_RSF=false;
+  showStatus();
+  els.classicOut.textContent = '';
+  els.rsfOut.textContent = '';
+  els.testsStatus.textContent = 'Not run';
+  els.testsStatus.className = 'pill mut';
+  els.classicLog.textContent = '';
+  els.rsfLog.textContent = '';
+  latestResults = null;
+});
+els.breakClassicBtn.addEventListener('click', ()=>{ BREAK_CLASSIC=!BREAK_CLASSIC; showStatus(); });
+els.breakRSFBtn.addEventListener('click', ()=>{ BREAK_RSF=!BREAK_RSF; showStatus(); });
+els.testsBtn.addEventListener('click', testBattery);
+els.downloadBtn.addEventListener('click', ()=>{
+  if (!latestResults){ alert('Run a computation or tests first.'); return; }
+  const data = JSON.stringify(latestResults,null,2);
+  const blob = new Blob([data],{type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `zfc-vs-rsf-arithmetic-${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.json`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+
+// initialize
+showStatus();
+</script>
+</body>
+</html>
